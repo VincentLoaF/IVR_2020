@@ -42,7 +42,14 @@ class image_converter:
         self.end_eff_close_z_pub = rospy.Publisher("/robot/end_eff_position/close/z", Float64, queue_size=10)
 
         # initialize subscribers
-        self.joints = rospy.Subscriber("/robot/joint_states", JointState,self.callback)
+        self.joints = message_filters.Subscriber("/robot/joint_states", JointState)
+        self.robot_obstacle_pos_est_sub1 = message_filters.Subscriber("/robot/obstacle_position_estimation/cam1",
+                                                                    Float64MultiArray)
+        self.robot_obstacle_pos_est_sub2 = message_filters.Subscriber("/robot/obstacle_position_estimation/cam2",
+                                                                    Float64MultiArray)
+        self.ts = message_filters.ApproximateTimeSynchronizer(
+            [self.joints, self.robot_obstacle_pos_est_sub1, self.robot_obstacle_pos_est_sub2], 10, 0.1, allow_headerless=True)
+        self.ts.registerCallback(self.callback)
 
 
     def calculate_jacobian(self, theta1, theta2, theta3, theta4):
@@ -112,9 +119,9 @@ class image_converter:
     def control_closed(self,input):
         print("control")
         # P gain
-        K_p = np.array([[5.5, 0, 0], [0, 5.5, 0], [0, 0, 5.5]])
+        K_p = np.array([[20, 0, 0], [0, 20, 0], [0, 0, 20]])
         # D gain
-        K_d = np.array([[0.1, 0, 0], [0, 0.1, 0], [0, 0, 0.1]])
+        K_d = np.array([[0.5, 0, 0], [0, 0.5, 0], [0, 0, 0.5]])
         # estimate time step
         cur_time = np.array([rospy.get_time()])
         dt = cur_time - self.time_previous_step
@@ -130,11 +137,14 @@ class image_converter:
         self.end_eff_true_x_pub.publish(pos_d[0])
         self.end_eff_true_y_pub.publish(pos_d[1])
         self.end_eff_true_z_pub.publish(pos_d[2])
-        J_inv = np.linalg.pinv(self.calculate_jacobian(input[0],input[1],input[2],input[3]))  # calculating the psudeo inverse of Jacobian
+        J = self.calculate_jacobian(input[0],input[1],input[2],input[3])
+        J_inv = np.linalg.pinv(J)  # calculating the psudeo inverse of Jacobian
         dq_d = np.dot(J_inv, (np.dot(K_d, self.error_d.transpose()) + np.dot(K_p, self.error.transpose())))  # control input (angular velocity of joints)
         print("diff")
         print(dq_d)
-        q_d = input + (dt * dq_d)  # control input (angular position of joints)
+        q0 = np.dot(J.transpose(), self.obstacle)
+        I = np.identity(4)
+        q_d = input + (dt * dq_d) + 1e+10 * np.dot(I - np.dot(J_inv, J), q0)  # control input (angular position of joints)
         return q_d
 
     def detect_end_effector_fk(self, theta1, theta2, theta3, theta4):
@@ -148,7 +158,12 @@ class image_converter:
         end_eff_pos = np.array([x, y, z])
         return end_eff_pos
 
-    def callback(self,data):
+    def callback(self,data, obstacle_cam1, obstacle_cam2):
+        self.obstacle_posx = obstacle_cam2.data[0]
+        self.obstacle_posy = obstacle_cam1.data[0]
+        self.obstacle_posz = np.mean([obstacle_cam2.data[1], obstacle_cam1.data[1]]) + 1
+        self.obstacle = np.array([self.obstacle_posx, self.obstacle_posy, self.obstacle_posz])
+
         angles = np.array(data.position)
         print(angles)
         q_d = self.control_closed(angles)

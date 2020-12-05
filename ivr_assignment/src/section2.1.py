@@ -21,6 +21,9 @@ class image_converter:
         # initialize the bridge between openCV and ROS
         self.bridge = CvBridge()
         # initialize a publisher to send estimated joints' position to the robot
+        self.red_posx_pub = rospy.Publisher("/robot/red_position_estimation/x", Float64, queue_size=10)
+        self.red_posy_pub = rospy.Publisher("/robot/red_position_estimation/y", Float64, queue_size=10)
+        self.red_posz_pub = rospy.Publisher("/robot/red_position_estimation/z", Float64, queue_size=10)
         self.red_pos_pub = rospy.Publisher("/robot/red_position_estimation/3d", Float64MultiArray, queue_size=10)
         self.joint2_angle_pub = rospy.Publisher("/robot/joint2_position_controller/estimation", Float64, queue_size=10)
         self.joint3_angle_pub = rospy.Publisher("/robot/joint3_position_controller/estimation", Float64, queue_size=10)
@@ -52,24 +55,57 @@ class image_converter:
                                    np.mean([green_pos_cam2.data[1], green_pos_cam1.data[1]])])
         self.red_pos = np.array([red_pos_cam2.data[0], red_pos_cam1.data[0],
                                  np.mean([red_pos_cam2.data[1], red_pos_cam1.data[1]])])
+        self.red_pos_x = Float64()
+        self.red_pos_x.data = self.red_pos[0]
+        self.red_pos_y = Float64()
+        self.red_pos_y.data = self.red_pos[1]
+        self.red_pos_z = Float64()
+        self.red_pos_z.data = self.red_pos[2]
         self.red_pos_f = Float64MultiArray()
         self.red_pos_f.data = self.red_pos
 
-        end_of_semicircle_pos_j2 = self.blue_pos + np.array([0, 3.5, 0])
-        dist = np.sqrt(np.sum((end_of_semicircle_pos_j2 - self.green_pos) ** 2))
-        cos_joint2 = (2 * 3.5 ** 2 - dist ** 2) / (2 * 3.5 * 3.5)
-        if cos_joint2 > 1:  cos_joint2 = 1
-        if cos_joint2 < -1: cos_joint2 = -1
-        self.joint2_angle = Float64()
-        self.joint2_angle.data = np.arccos(cos_joint2) - np.pi / 2
+        # end_of_semicircle_pos_j2 = self.blue_pos + np.array([0, 3.5, 0])
+        # dist = np.sqrt(np.sum((end_of_semicircle_pos_j2 - self.green_pos) ** 2))
+        # cos_joint2 = (2 * 3.5 ** 2 - dist ** 2) / (2 * 3.5 * 3.5)
+        # if cos_joint2 > 1:  cos_joint2 = 1
+        # if cos_joint2 < -1: cos_joint2 = -1
+        # self.joint2_angle = Float64()
+        # self.joint2_angle.data = np.arccos(cos_joint2) - np.pi / 2
 
         end_of_semicircle_pos_j3 = self.blue_pos + np.array([-3.5, 0, 0])
         dist = np.sqrt(np.sum((end_of_semicircle_pos_j3 - self.green_pos) ** 2))
         cos_joint3 = (2 * 3.5 ** 2 - dist ** 2) / (2 * 3.5 * 3.5)
+        if cos_joint3 < 0: cos_joint3 *= 0.8
         if cos_joint3 > 1:  cos_joint3 = 1
         if cos_joint3 < -1: cos_joint3 = -1
         self.joint3_angle = Float64()
         self.joint3_angle.data = np.arccos(cos_joint3) - np.pi / 2
+
+        origin = self.blue_pos + np.array([3.5 * np.cos(np.pi / 2 - self.joint3_angle.data), 0, 0])
+        r = 3.5 * np.sin(np.pi / 2 - self.joint3_angle.data)
+        midpoint_of_semicircle_pos_j2 = origin + np.array([0, 0, r])
+        dist = np.sqrt(np.sum((midpoint_of_semicircle_pos_j2 - self.green_pos) ** 2))
+        cos_joint2 = (2 * 3.5 ** 2 - dist ** 2) / (2 * 3.5 * 3.5)
+        if cos_joint2 < 0:  cos_joint2 = 0
+        self.joint2_angle = Float64()
+        self.joint2_angle.data = np.arccos(cos_joint2)
+
+        # if self.green_pos[1] < self.blue_pos[1]:
+        #     if self.joint3_angle.data > 0:
+        #         self.joint2_angle.data = np.arccos(cos_joint2) * (0.85 + self.joint3_angle.data ** 2 * 0.6)
+        #     else:
+        #         self.joint2_angle.data = np.arccos(cos_joint2) * (0.85 + self.joint3_angle.data ** 2 * 0.9)
+        #
+        # else:
+        #     if self.joint3_angle.data > 0:
+        #         self.joint2_angle.data = -np.arccos(cos_joint2) * (0.85 + self.joint3_angle.data ** 2 * 0.5)
+        #     else:
+        #         self.joint2_angle.data = -np.arccos(cos_joint2) * (0.85 + self.joint3_angle.data ** 2 * 1.3)
+        #
+        # if self.joint2_angle.data > np.pi / 2:
+        #     self.joint2_angle.data = np.pi / 2
+        # if self.joint2_angle.data < -np.pi / 2:
+        #     self.joint2_angle.data = -np.pi / 2
 
         v1 = self.blue_pos - self.green_pos
         v2 = end_of_semicircle_pos_j3 - self.green_pos
@@ -87,6 +123,9 @@ class image_converter:
 
         # Publish the results
         try:
+            self.red_posx_pub.publish(self.red_pos_x)
+            self.red_posy_pub.publish(self.red_pos_y)
+            self.red_posz_pub.publish(self.red_pos_z)
             self.red_pos_pub.publish(self.red_pos_f)
             self.joint2_angle_pub.publish(self.joint2_angle)
             self.joint3_angle_pub.publish(self.joint3_angle)

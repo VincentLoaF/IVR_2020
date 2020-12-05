@@ -38,6 +38,8 @@ class image_converter:
                                                       queue_size=10)
         self.robot_target_pos_est_pub1 = rospy.Publisher("/robot/target_position_estimation/cam1", Float64MultiArray,
                                                          queue_size=10)
+        self.robot_obstacle_pos_est_pub1 = rospy.Publisher("/robot/obstacle_position_estimation/cam1", Float64MultiArray,
+                                                         queue_size=10)
         # record the beginning time
         self.start_time = rospy.get_time()
 
@@ -139,6 +141,26 @@ class image_converter:
 
         return self.prev_target
 
+    def detect_obstacle(self, image):
+        img_t = cv2.inRange(image, (5, 50, 100), (50, 200, 255))
+        # cv2.imshow('img_t', img_t)
+        ret, binary = cv2.threshold(img_t, 0, 255, cv2.THRESH_BINARY)
+        contours, hierarchy = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        for i in range(len(contours)):
+            if len(contours[i]) < 10:
+                # cv2.imwrite('img_thresh_t.png', contours[i])
+                M = cv2.moments(contours[i])
+                if M['m00'] == 0:
+                    return self.prev_obstacle
+                cx = int(M['m10'] / M['m00'])
+                cy = int(M['m01'] / M['m00'])
+                ground = self.detect_yellow(image)
+                centre = np.array([cx - ground[0], ground[1] - cy])
+                self.prev_obstacle = centre
+                return centre
+
+        return self.prev_obstacle
+
     def pixel2meter(self, image, point):
         centroid_b = np.sqrt(np.sum(self.detect_blue(image) ** 2))
         return 2.5 / centroid_b * point
@@ -166,6 +188,8 @@ class image_converter:
         red_pos.data = self.pixel2meter(self.cv_image1, self.detect_red(self.cv_image1))
         target_pos = Float64MultiArray()
         target_pos.data = self.pixel2meter(self.cv_image1, self.detect_target(self.cv_image1))
+        obstacle_pos = Float64MultiArray()
+        obstacle_pos.data = self.pixel2meter(self.cv_image2, self.detect_obstacle(self.cv_image2))
 
         # Publish the results
         try:
@@ -174,6 +198,7 @@ class image_converter:
             self.robot_green_pos_est_pub1.publish(green_pos)
             self.robot_red_pos_est_pub1.publish(red_pos)
             self.robot_target_pos_est_pub1.publish(target_pos)
+            self.robot_obstacle_pos_est_pub1.publish(obstacle_pos)
         except CvBridgeError as e:
             print(e)
 

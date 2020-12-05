@@ -24,6 +24,7 @@ class image_converter:
         self.target_posx_pub = rospy.Publisher("/target/x_position_controller/estimation", Float64, queue_size=10)
         self.target_posy_pub = rospy.Publisher("/target/y_position_controller/estimation", Float64, queue_size=10)
         self.target_posz_pub = rospy.Publisher("/target/z_position_controller/estimation", Float64, queue_size=10)
+        self.target_pub = rospy.Publisher("/target/estimation", Float64MultiArray, queue_size=10)
 
         self.robot_target_pos_est_sub1 = message_filters.Subscriber("/robot/target_position_estimation/cam1",
                                                                     Float64MultiArray)
@@ -40,12 +41,15 @@ class image_converter:
         self.target_posy.data = target_pos_cam1.data[0]
         self.target_posz = Float64()
         self.target_posz.data = np.mean([target_pos_cam2.data[1], target_pos_cam1.data[1]]) + 1
+        self.target = Float64MultiArray()
+        self.target.data = np.array([self.target_posx.data, self.target_posy.data, self.target_posz.data])
 
         # Publish the results
         try:
             self.target_posx_pub.publish(self.target_posx)
             self.target_posy_pub.publish(self.target_posy)
             self.target_posz_pub.publish(self.target_posz)
+            self.target_pub.publish(self.target)
         except CvBridgeError as e:
             print(e)
 
